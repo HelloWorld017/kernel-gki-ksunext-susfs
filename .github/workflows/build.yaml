@@ -1,0 +1,504 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # ============================================================
+  # Update pins
+  #
+  # Normal GKI update within android14-6.1:
+  #   -> usually only GKI_BUILD_ID needs changing.
+  #
+  # KernelSU / SUSFS update:
+  #   -> change the corresponding commit.
+  #
+  # Kernel generation change (e.g. 6.1 -> 6.6):
+  #   -> also change GKI_BUILD_CONFIG and SUSFS_PATCH.
+  # ============================================================
+
+  # Official Android CI GKI build.
+  # Current base:
+  #   common = fa1d6308d1fe803c3fdebcd3ee6f7a1155fc3462
+  GKI_BUILD_ID: "14691759"
+  GKI_TARGET: "kernel_aarch64"
+  GKI_BUILD_CONFIG: "common/build.config.gki.aarch64"
+
+  # KernelSU Next
+  KSUN_REPO: "https://github.com/pershoot/KernelSU-Next.git"
+  KSUN_COMMIT: "19d9e1f255d4afedb85eb7032f4725cda6d25d36"
+
+  # Only used as the displayed KernelSU version tag.
+  # Kernel code itself is selected solely by KSUN_COMMIT.
+  KSUN_VERSION_TAG: "v3.3.0"
+
+  # SUSFS
+  SUSFS_REPO: "https://gitlab.com/simonpunk/susfs4ksu.git"
+  SUSFS_COMMIT: "4fc9c1898ea66f51847cdbc0d1473ea4ef525a70"
+  SUSFS_PATCH: "50_add_susfs_in_gki-android14-6.1.patch"
+
+  # git-repo v2.54 commit
+  REPO_TOOL_COMMIT: "97dc5c1bd9527c2abe2183b16a4b7ef037dc34a7"
+
+  KERNEL_DIR: "${{ github.workspace }}/kernel"
+  ARTIFACT_DIR: "${{ github.workspace }}/artifacts"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+
+    steps:
+      # ========================================================
+      # Runner setup
+      # ========================================================
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/.ghcup || true
+          sudo rm -rf /opt/ghc || true
+
+          docker system prune -af || true
+          sudo apt-get clean || true
+
+          df -h
+
+      - name: Install host dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            git \
+            curl \
+            ca-certificates \
+            patch \
+            rsync \
+            unzip \
+            zip \
+            xz-utils \
+            zstd \
+            lz4 \
+            python3 \
+            python-is-python3 \
+            libelf-dev \
+            libssl-dev \
+            flex \
+            bison \
+            bc \
+            cpio \
+            dwarves \
+            file
+
+      # ========================================================
+      # Pinned repo launcher
+      # ========================================================
+
+      - name: Install pinned repo tool
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p "${HOME}/bin"
+
+          curl \
+            --fail \
+            --location \
+            --retry 5 \
+            "https://gerrit.googlesource.com/git-repo/+/${REPO_TOOL_COMMIT}/repo?format=TEXT" \
+            | base64 --decode \
+            > "${HOME}/bin/repo"
+
+          chmod +x "${HOME}/bin/repo"
+
+          echo "${HOME}/bin" >> "${GITHUB_PATH}"
+
+      # ========================================================
+      # GKI pinned manifest
+      #
+      # manifest_$BID.xml contains the exact revisions used by
+      # Google's GKI build, including build system/toolchains.
+      # ========================================================
+
+      - name: Download pinned GKI manifest
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          MANIFEST="manifest_${GKI_BUILD_ID}.xml"
+
+          curl \
+            --fail \
+            --location \
+            --retry 5 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            "https://ci.android.com/builds/submitted/${GKI_BUILD_ID}/${GKI_TARGET}/latest/raw/${MANIFEST}" \
+            -o "${GITHUB_WORKSPACE}/${MANIFEST}"
+
+      - name: Sync pinned GKI source
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p "${KERNEL_DIR}"
+          cd "${KERNEL_DIR}"
+
+          # Initial repo setup only creates .repo infrastructure.
+          repo init \
+            -u https://android.googlesource.com/kernel/manifest \
+            --depth=1 \
+            --repo-url=https://gerrit.googlesource.com/git-repo \
+            --repo-rev="${REPO_TOOL_COMMIT}" \
+            --no-repo-verify
+
+          cp \
+            "${GITHUB_WORKSPACE}/manifest_${GKI_BUILD_ID}.xml" \
+            ".repo/manifests/manifest_${GKI_BUILD_ID}.xml"
+
+          # Replace the temporary manifest with Google's pinned
+          # manifest from the actual GKI build.
+          repo init \
+            -m "manifest_${GKI_BUILD_ID}.xml" \
+            --depth=1 \
+            --repo-url=https://gerrit.googlesource.com/git-repo \
+            --repo-rev="${REPO_TOOL_COMMIT}" \
+            --no-repo-verify
+
+          repo sync \
+            --no-tags \
+            --no-clone-bundle \
+            --force-sync \
+            -j4
+
+          df -h
+
+      # ========================================================
+      # KernelSU Next
+      # ========================================================
+
+      - name: Fetch pinned KernelSU Next
+        shell: bash
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+
+          mkdir KernelSU-Next
+
+          git -C KernelSU-Next init
+          git -C KernelSU-Next remote add origin "${KSUN_REPO}"
+
+          # Full ancestry of this exact commit is fetched because
+          # KernelSU derives its numeric version from commit count.
+          git -C KernelSU-Next fetch \
+            --no-tags \
+            origin \
+            "${KSUN_COMMIT}"
+
+          git -C KernelSU-Next checkout \
+            --detach \
+            FETCH_HEAD
+
+          # Derive deterministic KernelSU version solely from the
+          # ancestry of the pinned commit.
+          KSU_GIT_VERSION="$(
+            git -C KernelSU-Next rev-list --count HEAD
+          )"
+
+          KSU_VERSION="$((30000 + KSU_GIT_VERSION))"
+
+          # Remove Git dependency from Kbuild so it cannot inspect or
+          # fetch changing remote refs during compilation.
+          sed -i \
+            "s/^KSU_VERSION_FALLBACK := 1$/KSU_VERSION_FALLBACK := ${KSU_VERSION}/" \
+            KernelSU-Next/kernel/Kbuild
+
+          sed -i \
+            "s/^KSU_VERSION_TAG_FALLBACK := v0.0.1$/KSU_VERSION_TAG_FALLBACK := ${KSUN_VERSION_TAG}/" \
+            KernelSU-Next/kernel/Kbuild
+
+          rm -rf KernelSU-Next/.git
+
+      - name: Integrate KernelSU Next
+        shell: bash
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+
+          DRIVER_DIR="${KERNEL_DIR}/common/drivers"
+          KSU_KERNEL="${KERNEL_DIR}/KernelSU-Next/kernel"
+
+          ln -sfn \
+            "$(realpath --relative-to="${DRIVER_DIR}" "${KSU_KERNEL}")" \
+            "${DRIVER_DIR}/kernelsu"
+
+          if ! grep -Fq \
+            'obj-$(CONFIG_KSU) += kernelsu/' \
+            "${DRIVER_DIR}/Makefile"; then
+
+            printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' \
+              >> "${DRIVER_DIR}/Makefile"
+          fi
+
+          if ! grep -Fq \
+            'source "drivers/kernelsu/Kconfig"' \
+            "${DRIVER_DIR}/Kconfig"; then
+
+            sed -i \
+              '/endmenu/i source "drivers/kernelsu/Kconfig"' \
+              "${DRIVER_DIR}/Kconfig"
+          fi
+
+      # ========================================================
+      # SUSFS
+      # ========================================================
+
+      - name: Fetch pinned SUSFS
+        shell: bash
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+
+          mkdir susfs4ksu
+
+          git -C susfs4ksu init
+          git -C susfs4ksu remote add origin "${SUSFS_REPO}"
+
+          git -C susfs4ksu fetch \
+            --depth=1 \
+            --no-tags \
+            origin \
+            "${SUSFS_COMMIT}"
+
+          git -C susfs4ksu checkout \
+            --detach \
+            FETCH_HEAD
+
+      # ========================================================
+      # SUSFS integration
+      # ========================================================
+
+      - name: Apply SUSFS
+        shell: bash
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+
+          SUSFS="${KERNEL_DIR}/susfs4ksu"
+
+          cp -a \
+            "${SUSFS}/kernel_patches/fs/." \
+            common/fs/
+
+          cp -a \
+            "${SUSFS}/kernel_patches/include/linux/." \
+            common/include/linux/
+
+          SUBLEVEL="$(
+            awk '$1 == "SUBLEVEL" { print $3; exit }' \
+              common/Makefile
+          )"
+
+          # Compatibility adjustments used by this SUSFS revision
+          # across android14-6.1 source revisions.
+
+          if [ "${SUBLEVEL}" -le 25 ]; then
+            sed -i \
+              '/^#include <trace\/events\/oom.h>$/a #include <trace/hooks/sched.h>' \
+              common/fs/proc/base.c
+          fi
+
+          if [ "${SUBLEVEL}" -le 141 ]; then
+            sed -i \
+              '/^#include <linux\/cpufreq_times.h>$/a #include <linux/dma-buf.h>' \
+              common/fs/proc/base.c
+          fi
+
+          if [ "${SUBLEVEL}" -ge 157 ]; then
+            sed -i \
+              '/^#include <trace\/hooks\/blk.h>$/d' \
+              common/fs/namespace.c
+          fi
+
+          patch \
+            -d common \
+            -p1 \
+            < "${SUSFS}/kernel_patches/${SUSFS_PATCH}"
+
+      # ========================================================
+      # Kconfig
+      # ========================================================
+
+      - name: Configure kernel
+        shell: bash
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+
+          CONFIG="common/arch/arm64/configs/gki_defconfig"
+          CONFIG_TOOL="common/scripts/config"
+
+          enable_config() {
+            "${CONFIG_TOOL}" \
+              --file "${CONFIG}" \
+              -e "$1"
+          }
+
+          disable_config() {
+            "${CONFIG_TOOL}" \
+              --file "${CONFIG}" \
+              -d "$1"
+          }
+
+          enable_config KSU
+
+          enable_config KSU_SUSFS
+          enable_config KSU_SUSFS_SUS_PATH
+          enable_config KSU_SUSFS_SUS_MOUNT
+          enable_config KSU_SUSFS_SUS_KSTAT
+          enable_config KSU_SUSFS_SPOOF_UNAME
+          enable_config KSU_SUSFS_ENABLE_LOG
+          enable_config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
+          enable_config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+          enable_config KSU_SUSFS_SUS_MAP
+          enable_config KSU_SUSFS_OPEN_REDIRECT
+
+          disable_config KSU_DEBUG
+
+      # ========================================================
+      # GKI build
+      #
+      # gki_defconfig was intentionally modified, therefore the
+      # stock check_defconfig hook is disabled through Google's
+      # supported GKI_BUILD_CONFIG_FRAGMENT mechanism rather than
+      # modifying build.config.gki itself.
+      # ========================================================
+
+      - name: Create custom GKI build fragment
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cat > "${RUNNER_TEMP}/gki-custom.fragment" <<'EOF'
+          POST_DEFCONFIG_CMDS=""
+          EOF
+
+      - name: Build GKI
+        shell: bash
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+
+          GKI_BUILD_CONFIG_FRAGMENT="${RUNNER_TEMP}/gki-custom.fragment" \
+          BUILD_CONFIG="${GKI_BUILD_CONFIG}" \
+            build/build.sh
+
+      # ========================================================
+      # Collect output
+      #
+      # On Pixel, keep the stock ramdisk/initrd and replace only
+      # its kernel Image.
+      # ========================================================
+
+      - name: Collect artifacts
+        shell: bash
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+
+          mkdir -p "${ARTIFACT_DIR}"
+
+          IMAGE="$(
+            find out \
+              -type f \
+              -path '*/dist/Image' \
+              -print \
+              -quit
+          )"
+
+          if [ -z "${IMAGE}" ]; then
+            echo "GKI Image was not found"
+            exit 1
+          fi
+
+          DIST="$(dirname "${IMAGE}")"
+
+          cp "${DIST}/Image" \
+            "${ARTIFACT_DIR}/Image"
+
+          for FILE in \
+            Image.gz \
+            Image.lz4 \
+            System.map \
+            vmlinux \
+            vmlinux.symvers \
+            modules.builtin \
+            modules.builtin.modinfo
+          do
+            if [ -f "${DIST}/${FILE}" ]; then
+              cp \
+                "${DIST}/${FILE}" \
+                "${ARTIFACT_DIR}/${FILE}"
+            fi
+          done
+
+          cp \
+            "${GITHUB_WORKSPACE}/manifest_${GKI_BUILD_ID}.xml" \
+            "${ARTIFACT_DIR}/"
+
+          cp \
+            common/arch/arm64/configs/gki_defconfig \
+            "${ARTIFACT_DIR}/gki_defconfig"
+
+      # ========================================================
+      # Metadata / hashes
+      # ========================================================
+
+      - name: Create build information
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cat > "${ARTIFACT_DIR}/BUILD_INFO.txt" <<EOF
+          GKI_BUILD_ID=${GKI_BUILD_ID}
+          GKI_TARGET=${GKI_TARGET}
+          GKI_BUILD_CONFIG=${GKI_BUILD_CONFIG}
+
+          KSUN_REPO=${KSUN_REPO}
+          KSUN_COMMIT=${KSUN_COMMIT}
+
+          SUSFS_REPO=${SUSFS_REPO}
+          SUSFS_COMMIT=${SUSFS_COMMIT}
+          SUSFS_PATCH=${SUSFS_PATCH}
+          EOF
+
+          cd "${ARTIFACT_DIR}"
+
+          sha256sum \
+            $(find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort) \
+            > SHA256SUMS.txt
+
+          echo "=== artifacts ==="
+          ls -lh
+
+          echo
+          cat SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: gki-${{ env.GKI_BUILD_ID }}-ksun-susfs
+          path: artifacts/
+          if-no-files-found: error
+          compression-level: 0
