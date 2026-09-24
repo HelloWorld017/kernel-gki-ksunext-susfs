@@ -1,34 +1,29 @@
 name: Build Kernel
 
 on:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      gki_build_id:
+        required: true
+        type: string
+      ksun_commit:
+        required: true
+        type: string
+      susfs_commit:
+        required: true
+        type: string
+      susfs_patch:
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 env:
-  # ============================================================
-  # Update pins
-  #
-  # Normal GKI update within android14-6.1:
-  #   -> usually only GKI_BUILD_ID needs changing.
-  #
-  # KernelSU / SUSFS update:
-  #   -> change the corresponding commit.
-  #
-  # Kernel generation change (e.g. 6.1 -> 6.6):
-  #   -> also change GKI_BUILD_CONFIG and SUSFS_PATCH.
-  # ============================================================
-
-  # Official Android CI GKI build.
-  # Current base:
-  #   common = fa1d6308d1fe803c3fdebcd3ee6f7a1155fc3462
-  GKI_BUILD_ID: "14691759"
   GKI_TARGET: "kernel_aarch64"
 
   # KernelSU Next
   KSUN_REPO: "https://github.com/pershoot/KernelSU-Next.git"
-  KSUN_COMMIT: "19d9e1f255d4afedb85eb7032f4725cda6d25d36"
 
   # Only used as the displayed KernelSU version tag.
   # Kernel code itself is selected solely by KSUN_COMMIT.
@@ -36,8 +31,6 @@ env:
 
   # SUSFS
   SUSFS_REPO: "https://gitlab.com/simonpunk/susfs4ksu.git"
-  SUSFS_COMMIT: "4fc9c1898ea66f51847cdbc0d1473ea4ef525a70"
-  SUSFS_PATCH: "50_add_susfs_in_gki-android14-6.1.patch"
 
   # git-repo v2.54 commit
   REPO_TOOL_COMMIT: "97dc5c1bd9527c2abe2183b16a4b7ef037dc34a7"
@@ -49,6 +42,11 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
+    env:
+      GKI_BUILD_ID: ${{ inputs.gki_build_id }}
+      KSUN_COMMIT: ${{ inputs.ksun_commit }}
+      SUSFS_COMMIT: ${{ inputs.susfs_commit }}
+      SUSFS_PATCH: ${{ inputs.susfs_patch }}
 
     steps:
       # ========================================================

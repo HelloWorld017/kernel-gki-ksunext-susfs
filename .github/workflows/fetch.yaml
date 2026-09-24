@@ -1,0 +1,41 @@
+name: Fetch Stock Boot Image
+
+on:
+  workflow_call:
+    inputs:
+      device_id:
+        required: true
+        type: string
+      build_tag:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out scripts
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Fetch stock boot.img
+        shell: bash
+        env:
+          DEVICE_ID: ${{ inputs.device_id }}
+          BUILD_TAG: ${{ inputs.build_tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/fetch_boot_image.py \
+            "${DEVICE_ID}" "${BUILD_TAG}" \
+            --output stock-boot.img
+
+      - name: Upload stock boot image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: stock-boot
+          path: stock-boot.img
+          if-no-files-found: error
+          compression-level: 0
