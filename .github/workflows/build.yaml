@@ -25,7 +25,6 @@ env:
   #   common = fa1d6308d1fe803c3fdebcd3ee6f7a1155fc3462
   GKI_BUILD_ID: "14691759"
   GKI_TARGET: "kernel_aarch64"
-  GKI_BUILD_CONFIG: "common/build.config.gki.aarch64"
 
   # KernelSU Next
   KSUN_REPO: "https://github.com/pershoot/KernelSU-Next.git"
@@ -340,69 +339,93 @@ jobs:
       # Kconfig
       # ========================================================
 
-      - name: Configure kernel
+
+      - name: Create defconfig fragment
+        shell: bash
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          set -euxo pipefail
+          cat > common/ksu_susfs_defconfig <<EOF
+          CONFIG_KSU=y
+          # CONFIG_KSU_DEBUG is not set
+
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          EOF
+
+          # --defconfig_fragment requires the source file to be a
+          # Bazel-visible target.
+          cat >> common/BUILD.bazel <<EOF
+
+          exports_files([
+              "ksu_susfs_defconfig",
+          ])
+          EOF
+
+      - name: Commit patched kernel tree
         shell: bash
         working-directory: ${{ env.KERNEL_DIR }}
         run: |
           set -euxo pipefail
 
-          CONFIG="common/arch/arm64/configs/gki_defconfig"
-          CONFIG_TOOL="common/scripts/config"
+          BASE_TIMESTAMP="$(
+            git -C common show \
+              -s \
+              --format=%ct \
+              HEAD
+          )"
 
-          enable_config() {
-            "${CONFIG_TOOL}" \
-              --file "${CONFIG}" \
-              -e "$1"
-          }
+          COMMIT_DATE="$(
+            date \
+              --utc \
+              --date="@${BASE_TIMESTAMP}" \
+              '+%Y-%m-%dT%H:%M:%S +0000'
+          )"
 
-          disable_config() {
-            "${CONFIG_TOOL}" \
-              --file "${CONFIG}" \
-              -d "$1"
-          }
+          git -C common config user.name \
+            "GKI Kernel Builder"
 
-          enable_config KSU
+          git -C common config user.email \
+            "gki-builder@localhost"
 
-          enable_config KSU_SUSFS
-          enable_config KSU_SUSFS_SUS_PATH
-          enable_config KSU_SUSFS_SUS_MOUNT
-          enable_config KSU_SUSFS_SUS_KSTAT
-          enable_config KSU_SUSFS_SPOOF_UNAME
-          enable_config KSU_SUSFS_ENABLE_LOG
-          enable_config KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-          enable_config KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-          enable_config KSU_SUSFS_SUS_MAP
-          enable_config KSU_SUSFS_OPEN_REDIRECT
+          git -C common add -A
 
-          disable_config KSU_DEBUG
+          GIT_AUTHOR_DATE="${COMMIT_DATE}" \
+          GIT_COMMITTER_DATE="${COMMIT_DATE}" \
+            git -C common commit \
+              --no-gpg-sign \
+              -m "KernelSU Next + SUSFS"
+
+          echo "PATCHED_KERNEL_COMMIT=$(git -C common rev-parse HEAD)" \
+            >> "${GITHUB_ENV}"
+
+          git -C common status --short
 
       # ========================================================
       # GKI build
-      #
-      # gki_defconfig was intentionally modified, therefore the
-      # stock check_defconfig hook is disabled through Google's
-      # supported GKI_BUILD_CONFIG_FRAGMENT mechanism rather than
-      # modifying build.config.gki itself.
       # ========================================================
-
-      - name: Create custom GKI build fragment
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cat > "${RUNNER_TEMP}/gki-custom.fragment" <<'EOF'
-          POST_DEFCONFIG_CMDS=""
-          EOF
-
       - name: Build GKI
         shell: bash
         working-directory: ${{ env.KERNEL_DIR }}
+        env:
+          BUILD_NUMBER: ${{ env.GKI_BUILD_ID }}
         run: |
           set -euxo pipefail
 
-          GKI_BUILD_CONFIG_FRAGMENT="${RUNNER_TEMP}/gki-custom.fragment" \
-          BUILD_CONFIG="${GKI_BUILD_CONFIG}" \
-            build/build.sh
+          tools/bazel run \
+            --config=stamp \
+            --defconfig_fragment=//common:ksu_susfs_defconfig \
+            //common:kernel_aarch64_dist \
+            -- \
+            --dist_dir="${KERNEL_DIR}/out/kernel_aarch64/dist"
 
       # ========================================================
       # Collect output
@@ -419,20 +442,13 @@ jobs:
 
           mkdir -p "${ARTIFACT_DIR}"
 
-          IMAGE="$(
-            find out \
-              -type f \
-              -path '*/dist/Image' \
-              -print \
-              -quit
-          )"
+          DIST="${KERNEL_DIR}/out/kernel_aarch64/dist"
+          IMAGE="${DIST}/Image"
 
-          if [ -z "${IMAGE}" ]; then
+          if [ ! -f "${IMAGE}" ]; then
             echo "GKI Image was not found"
             exit 1
           fi
-
-          DIST="$(dirname "${IMAGE}")"
 
           cp "${DIST}/Image" \
             "${ARTIFACT_DIR}/Image"
@@ -473,7 +489,6 @@ jobs:
           cat > "${ARTIFACT_DIR}/BUILD_INFO.txt" <<EOF
           GKI_BUILD_ID=${GKI_BUILD_ID}
           GKI_TARGET=${GKI_TARGET}
-          GKI_BUILD_CONFIG=${GKI_BUILD_CONFIG}
 
           KSUN_REPO=${KSUN_REPO}
           KSUN_COMMIT=${KSUN_COMMIT}
@@ -481,6 +496,10 @@ jobs:
           SUSFS_REPO=${SUSFS_REPO}
           SUSFS_COMMIT=${SUSFS_COMMIT}
           SUSFS_PATCH=${SUSFS_PATCH}
+
+          KLEAF_TARGET=//common:kernel_aarch64_dist
+          KLEAF_STAMP=true
+          PATCHED_KERNEL_COMMIT=${PATCHED_KERNEL_COMMIT}
           EOF
 
           cd "${ARTIFACT_DIR}"
