@@ -463,6 +463,7 @@ jobs:
           for FILE in \
             Image.gz \
             Image.lz4 \
+            boot-lz4.img \
             System.map \
             vmlinux \
             vmlinux.symvers \
