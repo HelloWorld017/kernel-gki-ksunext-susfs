@@ -25,10 +25,6 @@ env:
   # KernelSU Next
   KSUN_REPO: "https://github.com/pershoot/KernelSU-Next.git"
 
-  # Only used as the displayed KernelSU version tag.
-  # Kernel code itself is selected solely by KSUN_COMMIT.
-  KSUN_VERSION_TAG: "v3.3.0"
-
   # SUSFS
   SUSFS_REPO: "https://gitlab.com/simonpunk/susfs4ksu.git"
 
@@ -45,6 +41,7 @@ jobs:
     env:
       GKI_BUILD_ID: ${{ inputs.gki_build_id }}
       KSUN_COMMIT: ${{ inputs.ksun_commit }}
+      KSUN_VERSION_TAG: ${{ inputs.ksun_version_tag }}
       SUSFS_COMMIT: ${{ inputs.susfs_commit }}
       SUSFS_PATCH: ${{ inputs.susfs_patch }}
 

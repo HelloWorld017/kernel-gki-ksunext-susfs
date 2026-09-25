@@ -9,8 +9,9 @@ permissions:
 # Change these pins together when preparing a new boot image.
 env:
   GKI_BUILD_ID: "14691759"
-  KSUN_COMMIT: "19d9e1f255d4afedb85eb7032f4725cda6d25d36"
-  SUSFS_COMMIT: "4fc9c1898ea66f51847cdbc0d1473ea4ef525a70"
+  KSUN_COMMIT: "9f1dccda5ee932251a3c2cfe103f28ef579c04c0"
+  KSUN_VERSION_TAG: "v3.4.0"
+  SUSFS_COMMIT: "60024a4cedd16c83c75cb225d9ae37ba4fd8dbca"
   SUSFS_PATCH: "50_add_susfs_in_gki-android14-6.1.patch"
   DEVICE_ID: "husky"
   BUILD_TAG: "CP1A.260505.005"
@@ -21,6 +22,7 @@ jobs:
     outputs:
       gki_build_id: ${{ steps.pins.outputs.gki_build_id }}
       ksun_commit: ${{ steps.pins.outputs.ksun_commit }}
+      ksun_version_tag: ${{ steps.pins.outputs.ksun_version_tag }}
       susfs_commit: ${{ steps.pins.outputs.susfs_commit }}
       susfs_patch: ${{ steps.pins.outputs.susfs_patch }}
       device_id: ${{ steps.pins.outputs.device_id }}
@@ -35,6 +37,7 @@ jobs:
           {
             printf 'gki_build_id=%s\n' "${GKI_BUILD_ID}"
             printf 'ksun_commit=%s\n' "${KSUN_COMMIT}"
+            printf 'ksun_version_tag=%s\n' "${KSUN_VERSION_TAG}"
             printf 'susfs_commit=%s\n' "${SUSFS_COMMIT}"
             printf 'susfs_patch=%s\n' "${SUSFS_PATCH}"
             printf 'device_id=%s\n' "${DEVICE_ID}"
@@ -47,6 +50,7 @@ jobs:
     with:
       gki_build_id: ${{ needs.config.outputs.gki_build_id }}
       ksun_commit: ${{ needs.config.outputs.ksun_commit }}
+      ksun_version_tag: ${{ needs.config.outputs.ksun_version_tag }}
       susfs_commit: ${{ needs.config.outputs.susfs_commit }}
       susfs_patch: ${{ needs.config.outputs.susfs_patch }}
 
