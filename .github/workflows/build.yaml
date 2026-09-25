@@ -294,6 +294,9 @@ jobs:
 
           SUSFS="${KERNEL_DIR}/susfs4ksu"
 
+          rm -f common/android/abi_gki_protected_exports_aarch64
+          rm -f common/android/abi_gki_protected_exports_x86_64
+
           cp -a \
             "${SUSFS}/kernel_patches/fs/." \
             common/fs/
