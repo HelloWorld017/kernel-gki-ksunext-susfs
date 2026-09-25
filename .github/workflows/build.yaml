@@ -444,6 +444,7 @@ jobs:
 
           DIST="${KERNEL_DIR}/out/kernel_aarch64/dist"
           IMAGE="${DIST}/Image"
+          LZ4_IMAGE="${DIST}/Image.lz4"
           BOOT_IMAGE="${DIST}/boot.img"
 
           if [ ! -f "${IMAGE}" ]; then
@@ -454,15 +455,20 @@ jobs:
             echo "GKI boot.img was not found or is empty"
             exit 1
           fi
+          if [ ! -s "${LZ4_IMAGE}" ]; then
+            echo "GKI Image.lz4 was not found or is empty"
+            exit 1
+          fi
 
           cp "${DIST}/Image" \
             "${ARTIFACT_DIR}/Image"
+          cp "${LZ4_IMAGE}" \
+            "${ARTIFACT_DIR}/Image.lz4"
           cp "${BOOT_IMAGE}" \
             "${ARTIFACT_DIR}/boot.img"
 
           for FILE in \
             Image.gz \
-            Image.lz4 \
             boot-lz4.img \
             System.map \
             vmlinux \

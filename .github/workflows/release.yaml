@@ -61,17 +61,53 @@ jobs:
       device_id: ${{ needs.config.outputs.device_id }}
       build_tag: ${{ needs.config.outputs.build_tag }}
 
-  publish:
+  pack:
     needs: [config, build, fetch]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out packing script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Download built kernel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: gki-${{ needs.config.outputs.gki_build_id }}-ksun-susfs
+          path: pack/built
+
+      - name: Download stock boot image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: stock-boot
+          path: pack/stock
+
+      - name: Pack boot image
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/repack_boot_image.py \
+            pack/stock/stock-boot.img \
+            pack/built/Image.lz4 \
+            pack/boot.img
+
+      - name: Upload packed boot image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: packed-boot
+          path: pack/boot.img
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [config, pack, fetch]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download built boot image
+      - name: Download packed boot image
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: gki-${{ needs.config.outputs.gki_build_id }}-ksun-susfs
-          path: release/patched
+          name: packed-boot
+          path: release
 
       - name: Download stock boot image
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -104,7 +140,6 @@ jobs:
             exit 1
           fi
 
-          mv release/patched/boot-lz4.img release/boot.img
           gh release create "${RELEASE_TAG}" release/boot.img release/boot.original.img \
             --target "${GITHUB_SHA}" \
             --title "${DEVICE_ID} ${BUILD_TAG} GKI ${GKI_BUILD_ID}" \
