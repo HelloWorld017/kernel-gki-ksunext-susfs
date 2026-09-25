@@ -428,8 +428,7 @@ jobs:
       # ========================================================
       # Collect output
       #
-      # On Pixel, keep the stock ramdisk/initrd and replace only
-      # its kernel Image.
+      # Kleaf builds the GKI boot.img alongside the kernel Image.
       # ========================================================
 
       - name: Collect artifacts
@@ -442,14 +441,21 @@ jobs:
 
           DIST="${KERNEL_DIR}/out/kernel_aarch64/dist"
           IMAGE="${DIST}/Image"
+          BOOT_IMAGE="${DIST}/boot.img"
 
           if [ ! -f "${IMAGE}" ]; then
             echo "GKI Image was not found"
             exit 1
           fi
+          if [ ! -s "${BOOT_IMAGE}" ]; then
+            echo "GKI boot.img was not found or is empty"
+            exit 1
+          fi
 
           cp "${DIST}/Image" \
             "${ARTIFACT_DIR}/Image"
+          cp "${BOOT_IMAGE}" \
+            "${ARTIFACT_DIR}/boot.img"
 
           for FILE in \
             Image.gz \

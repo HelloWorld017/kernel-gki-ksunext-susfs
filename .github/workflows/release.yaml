@@ -57,23 +57,23 @@ jobs:
       device_id: ${{ needs.config.outputs.device_id }}
       build_tag: ${{ needs.config.outputs.build_tag }}
 
-  pack:
-    needs: [config, build, fetch]
-    uses: ./.github/workflows/pack.yaml
-    with:
-      gki_build_id: ${{ needs.config.outputs.gki_build_id }}
-
   publish:
-    needs: [config, pack]
+    needs: [config, build, fetch]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Download completed boot image
+      - name: Download built boot image
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: packed-boot
+          name: gki-${{ needs.config.outputs.gki_build_id }}-ksun-susfs
           path: release
+
+      - name: Download stock boot image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: stock-boot
+          path: release/stock
 
       - name: Publish GitHub Release
         shell: bash
@@ -88,6 +88,7 @@ jobs:
           SUSFS_PATCH: ${{ needs.config.outputs.susfs_patch }}
         run: |
           set -euo pipefail
+          mv release/stock/stock-boot.img release/boot.original.img
           RELEASE_TAG="${DEVICE_ID}-${BUILD_TAG}-gki-${GKI_BUILD_ID}-${KSUN_COMMIT:0:8}-${SUSFS_COMMIT:0:8}"
 
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
@@ -99,7 +100,7 @@ jobs:
             exit 1
           fi
 
-          gh release create "${RELEASE_TAG}" release/boot.img \
+          gh release create "${RELEASE_TAG}" release/boot.img release/boot.original.img \
             --target "${GITHUB_SHA}" \
             --title "${DEVICE_ID} ${BUILD_TAG} GKI ${GKI_BUILD_ID}" \
             --notes "Device: ${DEVICE_ID}
