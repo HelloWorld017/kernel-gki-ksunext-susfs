@@ -9,6 +9,10 @@ on:
       build_tag:
         required: true
         type: string
+    outputs:
+      gki_build_id:
+        description: GKI build ID extracted from the stock kernel
+        value: ${{ jobs.fetch.outputs.gki_build_id }}
 
 permissions:
   contents: read
@@ -17,6 +21,8 @@ jobs:
   fetch:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    outputs:
+      gki_build_id: ${{ steps.gki.outputs.gki_build_id }}
     steps:
       - name: Check out scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -31,6 +37,18 @@ jobs:
           python3 scripts/fetch_boot_image.py \
             "${DEVICE_ID}" "${BUILD_TAG}" \
             --output stock-boot.img
+
+      - name: Install kernel decompressor
+        run: sudo apt-get update && sudo apt-get install -y lz4
+
+      - name: Extract GKI build ID
+        id: gki
+        shell: bash
+        run: |
+          set -euo pipefail
+          GKI_BUILD_ID="$(python3 scripts/extract_gki_build_id.py stock-boot.img)"
+          printf 'gki_build_id=%s\n' "${GKI_BUILD_ID}" >> "${GITHUB_OUTPUT}"
+          echo "Stock GKI build ID: ${GKI_BUILD_ID}"
 
       - name: Upload stock boot image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

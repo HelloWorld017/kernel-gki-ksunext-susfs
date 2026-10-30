@@ -8,7 +8,6 @@ permissions:
 
 # Change these pins together when preparing a new boot image.
 env:
-  GKI_BUILD_ID: "14691759"
   KSUN_COMMIT: "9f1dccda5ee932251a3c2cfe103f28ef579c04c0"
   KSUN_VERSION_TAG: "v3.4.0"
   SUSFS_COMMIT: "60024a4cedd16c83c75cb225d9ae37ba4fd8dbca"
@@ -20,7 +19,6 @@ jobs:
   config:
     runs-on: ubuntu-24.04
     outputs:
-      gki_build_id: ${{ steps.pins.outputs.gki_build_id }}
       ksun_commit: ${{ steps.pins.outputs.ksun_commit }}
       ksun_version_tag: ${{ steps.pins.outputs.ksun_version_tag }}
       susfs_commit: ${{ steps.pins.outputs.susfs_commit }}
@@ -35,7 +33,6 @@ jobs:
         run: |
           set -euo pipefail
           {
-            printf 'gki_build_id=%s\n' "${GKI_BUILD_ID}"
             printf 'ksun_commit=%s\n' "${KSUN_COMMIT}"
             printf 'ksun_version_tag=%s\n' "${KSUN_VERSION_TAG}"
             printf 'susfs_commit=%s\n' "${SUSFS_COMMIT}"
@@ -45,10 +42,10 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
   build:
-    needs: config
+    needs: [config, fetch]
     uses: ./.github/workflows/build.yaml
     with:
-      gki_build_id: ${{ needs.config.outputs.gki_build_id }}
+      gki_build_id: ${{ needs.fetch.outputs.gki_build_id }}
       ksun_commit: ${{ needs.config.outputs.ksun_commit }}
       ksun_version_tag: ${{ needs.config.outputs.ksun_version_tag }}
       susfs_commit: ${{ needs.config.outputs.susfs_commit }}
@@ -71,7 +68,7 @@ jobs:
       - name: Download built kernel
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: gki-${{ needs.config.outputs.gki_build_id }}-ksun-susfs
+          name: gki-${{ needs.fetch.outputs.gki_build_id }}-ksun-susfs
           path: pack/built
 
       - name: Download stock boot image
@@ -122,7 +119,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           DEVICE_ID: ${{ needs.config.outputs.device_id }}
           BUILD_TAG: ${{ needs.config.outputs.build_tag }}
-          GKI_BUILD_ID: ${{ needs.config.outputs.gki_build_id }}
+          GKI_BUILD_ID: ${{ needs.fetch.outputs.gki_build_id }}
           KSUN_COMMIT: ${{ needs.config.outputs.ksun_commit }}
           SUSFS_COMMIT: ${{ needs.config.outputs.susfs_commit }}
           SUSFS_PATCH: ${{ needs.config.outputs.susfs_patch }}
