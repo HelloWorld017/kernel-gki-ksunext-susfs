@@ -8,12 +8,12 @@ permissions:
 
 # Change these pins together when preparing a new boot image.
 env:
-  KSUN_COMMIT: "9f1dccda5ee932251a3c2cfe103f28ef579c04c0"
-  KSUN_VERSION_TAG: "v3.4.0"
-  SUSFS_COMMIT: "60024a4cedd16c83c75cb225d9ae37ba4fd8dbca"
+  KSUN_COMMIT: "d21e0a66c887ae4bc75b7c9f83e41761819ec09a"
+  KSUN_VERSION_TAG: "v3.4.2"
+  SUSFS_COMMIT: "8b25990241174fe88d2131a9929e36b5e5ffb1d0"
   SUSFS_PATCH: "50_add_susfs_in_gki-android14-6.1.patch"
   DEVICE_ID: "husky"
-  BUILD_TAG: "CP1A.260505.005"
+  BUILD_TAG: "CP3A.261005.005"
 
 jobs:
   config:
