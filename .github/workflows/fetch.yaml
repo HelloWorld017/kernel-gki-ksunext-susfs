@@ -1,6 +1,16 @@
 name: Fetch Stock Boot Image
 
 on:
+  workflow_dispatch:
+    inputs:
+      device_id:
+        description: Pixel device codename (e.g. husky)
+        required: true
+        type: string
+      build_tag:
+        description: Factory build tag (e.g. CP1A.260505.005)
+        required: true
+        type: string
   workflow_call:
     inputs:
       device_id:
@@ -49,6 +59,15 @@ jobs:
           GKI_BUILD_ID="$(python3 scripts/extract_gki_build_id.py stock-boot.img)"
           printf 'gki_build_id=%s\n' "${GKI_BUILD_ID}" >> "${GITHUB_OUTPUT}"
           echo "Stock GKI build ID: ${GKI_BUILD_ID}"
+          {
+            printf '## Stock boot image\n\n'
+            printf -- '- Device: `%s`\n' "${DEVICE_ID}"
+            printf -- '- Factory build: `%s`\n' "${BUILD_TAG}"
+            printf -- '- GKI build ID: `%s`\n' "${GKI_BUILD_ID}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+        env:
+          DEVICE_ID: ${{ inputs.device_id }}
+          BUILD_TAG: ${{ inputs.build_tag }}
 
       - name: Upload stock boot image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
